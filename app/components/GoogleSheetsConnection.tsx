@@ -34,19 +34,38 @@ export default function GoogleSheetsConnection({ onConnected }: GoogleSheetsConn
     setErrorMessage('')
 
     try {
-      // Simulate API call to test connection
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      // Test the connection by fetching spreadsheet info
+      const response = await fetch('/api/google-sheets/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'getSpreadsheetInfo',
+          spreadsheetId: spreadsheetId
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to connect to Google Sheets')
+      }
+
+      const result = await response.json()
       
-      // Store the spreadsheet ID (in a real app, you'd save this to your backend)
-      localStorage.setItem('googleSheetsId', spreadsheetId)
-      
-      setConnectionStatus('success')
-      setTimeout(() => {
-        onConnected()
-      }, 1500)
+      if (result.success) {
+        // Store the spreadsheet ID
+        localStorage.setItem('googleSheetsId', spreadsheetId)
+        
+        setConnectionStatus('success')
+        setTimeout(() => {
+          onConnected()
+        }, 1500)
+      } else {
+        throw new Error(result.error || 'Failed to connect')
+      }
     } catch (error) {
       setConnectionStatus('error')
-      setErrorMessage('Failed to connect. Please check your URL and try again.')
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to connect. Please check your URL and try again.')
     } finally {
       setIsConnecting(false)
     }
