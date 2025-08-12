@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleSheetsAPI } from '@/lib/google-sheets'
-
-const googleSheetsAPI = new GoogleSheetsAPI()
+import { GoogleSheetsAPI, GoogleSheetsConfig } from '@/lib/google-sheets'
 
 export async function GET(request: NextRequest) {
   try {
@@ -34,17 +32,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Create a new instance with the provided spreadsheet ID
+    const config: GoogleSheetsConfig = {
+      apiKey: process.env.GOOGLE_SHEETS_API_KEY || '',
+      spreadsheetId: spreadsheetId
+    }
+
+    const googleSheetsAPI = new GoogleSheetsAPI(config)
+
     switch (action) {
       case 'fetchCampaignData':
-        const campaignData = await fetchCampaignData(spreadsheetId)
+        const campaignData = await fetchCampaignData(googleSheetsAPI)
         return NextResponse.json({ success: true, data: campaignData })
 
       case 'getSpreadsheetInfo':
-        const spreadsheetInfo = await googleSheetsAPI.getSpreadsheetInfo(spreadsheetId)
+        const spreadsheetInfo = await googleSheetsAPI.getSpreadsheetInfo()
         return NextResponse.json({ success: true, data: spreadsheetInfo })
 
       case 'fetchAccountLinks':
-        const accountLinks = await googleSheetsAPI.fetchAccountLinks(spreadsheetId)
+        const accountLinks = await googleSheetsAPI.fetchAccountLinks()
         return NextResponse.json({ success: true, data: accountLinks })
 
       default:
@@ -62,13 +68,13 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function fetchCampaignData(spreadsheetId: string) {
+async function fetchCampaignData(googleSheetsAPI: GoogleSheetsAPI) {
   try {
     // Fetch campaign data from Google Sheets
-    const campaignData = await googleSheetsAPI.fetchCampaignData(spreadsheetId)
+    const budgetData = await googleSheetsAPI.fetchCampaignData()
     
     // Process the data to create budget overview
-    const processedData = processCampaignData(campaignData)
+    const processedData = processCampaignData(budgetData)
     
     return processedData
   } catch (error) {
@@ -77,32 +83,32 @@ async function fetchCampaignData(spreadsheetId: string) {
   }
 }
 
-function processCampaignData(campaignData: any[]) {
-  // Calculate totals
-  const totalSpend = campaignData.reduce((sum, campaign) => sum + (campaign.spend || 0), 0)
-  const totalBudget = campaignData.reduce((sum, campaign) => sum + (campaign.budget || 0), 0)
+function processCampaignData(budgetData: any) {
+  const { campaigns, totalSpend, totalBudget } = budgetData
+  
+  // Calculate pacing and remaining
   const pacing = totalBudget > 0 ? (totalSpend / totalBudget) * 100 : 0
   const remaining = Math.max(0, totalBudget - totalSpend)
 
-  // Group by platform
-  const platformData = campaignData.reduce((acc, campaign) => {
-    const platform = campaign.platform || 'Unknown'
+  // Group by platform (using account name as platform for now)
+  const platformData = campaigns.reduce((acc: any, campaign: any) => {
+    const platform = campaign.accountName || 'Unknown'
     if (!acc[platform]) {
       acc[platform] = { spend: 0, budget: 0 }
     }
-    acc[platform].spend += campaign.spend || 0
-    acc[platform].budget += campaign.budget || 0
+    acc[platform].spend += campaign.cost || 0
+    acc[platform].budget += parseFloat(campaign.budget) || 0
     return acc
-  }, {} as Record<string, { spend: number; budget: number }>)
+  }, {})
 
-  const platformBreakdown = Object.entries(platformData).map(([platform, data]) => ({
+  const platformBreakdown = Object.entries(platformData).map(([platform, data]: [string, any]) => ({
     platform,
     spend: data.spend,
     budget: data.budget
   }))
 
   // Create daily data (last 7 days)
-  const dailyData = generateDailyData(campaignData)
+  const dailyData = generateDailyData(campaigns)
 
   return {
     totalSpend,
@@ -111,11 +117,11 @@ function processCampaignData(campaignData: any[]) {
     remaining,
     dailyData,
     platformBreakdown,
-    campaignCount: campaignData.length
+    campaignCount: campaigns.length
   }
 }
 
-function generateDailyData(campaignData: any[]) {
+function generateDailyData(campaigns: any[]) {
   const days = 7
   const dailyData = []
   const today = new Date()
@@ -125,13 +131,13 @@ function generateDailyData(campaignData: any[]) {
     date.setDate(date.getDate() - i)
     
     // Calculate spend for this day (simplified - in reality you'd have daily breakdown)
-    const daySpend = campaignData.reduce((sum, campaign) => {
-      const dailySpend = (campaign.spend || 0) / days
+    const daySpend = campaigns.reduce((sum, campaign) => {
+      const dailySpend = (campaign.cost || 0) / days
       return sum + dailySpend
     }, 0)
     
-    const dayBudget = campaignData.reduce((sum, campaign) => {
-      const dailyBudget = (campaign.budget || 0) / days
+    const dayBudget = campaigns.reduce((sum, campaign) => {
+      const dailyBudget = (parseFloat(campaign.budget) || 0) / days
       return sum + dailyBudget
     }, 0)
 
